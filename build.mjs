@@ -49,6 +49,7 @@ const config = {
                             "-sSTANDALONE_WASM=1", // don't import memory
                             "--no-entry", // don't expect a main()
                             "-flto", // turn on link-time optimization (smaller etc.)
+                            "-fno-exceptions", // we don't need that
                             "-o", wasmPath,
                             args.path
                         ]);
