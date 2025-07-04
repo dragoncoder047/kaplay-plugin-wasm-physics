@@ -10,7 +10,7 @@
         "dev": "pnpm run \"/^dev:.*/\"",
         "lint": "tsc",
         "prepare": "if [ ! -e build/plugin.js ]; then npm run build; fi",
-        "debugwasm": "npx wasm2wat physics.wasm -o physics.wat --generate-names --enable-tail-call --inline-exports --inline-imports"
+        "debugwasm": "npx wasm2wat physics.wasm -f -o physics.wat --generate-names --enable-all"
     },
     "license": "GPL-3.0-only",
     "devDependencies": {

@@ -11,7 +11,6 @@ interface PhysicsWasmExports extends WebAssembly.Exports {
     /** runs all of the C++ top-level constructors */
     _initialize(): void;
     readonly memory: WebAssembly.Memory;
-    readonly CT_CIRCLE: WebAssembly.Global<"i32">;
     readonly CT_ELLIPSE: WebAssembly.Global<"i32">;
     readonly CT_POLYGON: WebAssembly.Global<"i32">;
     runCollision(): void;
@@ -22,7 +21,6 @@ interface PhysicsWasmExports extends WebAssembly.Exports {
 
     /** returns a new thing, initialized all other fields to NaN. call another to update it */
     collider_allocate(type: number, x: number, y: number): number;
-    circle_sendData(objPtr: number, radius: number): void;
     ellipse_sendData(objPtr: number, angle: number, radiusX: number, radiusY: number): void;
     /** returns pointer to the vertices which is a Float64Array with x, y, x, y, x, y, x, y, etc.
      * the first element (center) was already initialized. */
@@ -143,12 +141,12 @@ export function kaplayPhysicsWasm(k: KAPLAYCtx): Partial<KAPLAYCtx> {
 
     const allocWasmAreaObj = (localArea: Shape): number => {
         if (localArea instanceof k.Circle) {
-            const circlePtr = wasm.collider_allocate(wasm.CT_CIRCLE.value, localArea.center.x, localArea.center.y);
-            wasm.circle_sendData(circlePtr, localArea.radius);
+            const circlePtr = wasm.collider_allocate(wasm.CT_ELLIPSE.value, localArea.center.x, localArea.center.y);
+            wasm.ellipse_sendData(circlePtr, 0, localArea.radius, localArea.radius);
             return circlePtr;
         } else if (localArea instanceof k.Ellipse) {
             const ellipsePtr = wasm.collider_allocate(wasm.CT_ELLIPSE.value, localArea.center.x, localArea.center.y);
-            wasm.ellipse_sendData(ellipsePtr, localArea.angle, localArea.radiusX, localArea.radiusY);
+            wasm.ellipse_sendData(ellipsePtr, k.deg2rad(localArea.angle), localArea.radiusX, localArea.radiusY);
             return ellipsePtr;
         } else {
             const points: [Vec2, ...Vec2[]] = (

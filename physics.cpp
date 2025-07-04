@@ -3,13 +3,17 @@
 #include <string.h>
 #include <math.h>
 #include <optional>
+#include <limits>
 
 #define EXPORT EMSCRIPTEN_KEEPALIVE extern "C"
+
+typedef double f64;
+#define EPSILON (std::numeric_limits<f64>::epsilon())
 
 // MARK: imports
 
 /** handles the collisions, when found */
-EM_IMPORT(handleCollision) void handleCollision(int idA, int idB, double normX, double normY, double distance);
+EM_IMPORT(handleCollision) void handleCollision(int idA, int idB, f64 normX, f64 normY, f64 distance);
 
 /** returns true if the objects shouldn't collide with each other. */
 EM_IMPORT(checkCollisionIgnore) bool checkCollisionIgnore(int idA, int idB);
@@ -23,7 +27,7 @@ EM_IMPORT(pullTransform) void pullTransform(int id);
 // MARK: lists n' stuff
 
 typedef void (*iter_body)(void *arg, void *item);
-typedef double (*comparator)(void *left, void *right);
+typedef f64 (*comparator)(void *left, void *right);
 
 class List {
     public:
@@ -105,45 +109,92 @@ class List {
 
 class vec2 {
     public:
-    double x, y;
+    f64 x, y;
     vec2(): x(NAN), y(NAN) {}
-    vec2(double x, double y): x(x), y(y) {}
-    double length() const { return sqrt(x*x + y*y); }
+    vec2(f64 x, f64 y): x(x), y(y) {}
+    f64 length() const { return sqrt(x*x + y*y); }
     inline vec2 operator+(vec2 other) const { return vec2(x + other.x, y + other.y); }
     inline vec2 operator-(vec2 other) const { return vec2(x - other.x, y - other.y); }
     inline vec2 operator-() const { return vec2(-x, -y); }
-    inline vec2 operator*(double other) const { return vec2(x * other, y * other); }
+    inline vec2 operator*(f64 other) const { return vec2(x * other, y * other); }
     inline vec2 operator*(vec2 other) const { return vec2(x * other.x, y * other.y); }
-    inline vec2 operator/(double other) const { return vec2(x / other, y / other); }
-    inline vec2 unit() const { double l = length(); return vec2(x/l, y/l); }
-    inline double dot(vec2 other) const { return x * other.x + y * other.y; }
-    inline vec2 rotate(double angle) const { double s = sin(angle), c = cos(angle); return vec2(x*c - y*s, x*s + y*c); }
+    inline vec2 operator/(f64 other) const { return vec2(x / other, y / other); }
+    inline vec2 unit() const { f64 l = length(); return vec2(x/l, y/l); }
+    inline f64 dot(vec2 other) const { return x * other.x + y * other.y; }
+    inline vec2 rotate(f64 angle) const { f64 s = sin(angle), c = cos(angle); return vec2(x*c - y*s, x*s + y*c); }
 };
 
 class mat23 {
     public:
-    double a, b, c, d, e, f;
+    f64 a, b, c, d, e, f;
     mat23(): a(1), b(0), c(0), d(1), e(0), f(0) {}
-    mat23(double a, double b, double c, double d, double e, double f):
+    mat23(f64 a, f64 b, f64 c, f64 d, f64 e, f64 f):
         a(a), b(b), c(c), d(d), e(e), f(f) {}
     inline mat23 operator+(vec2 t) const { return mat23(a, b, c, d, e + vec2(a, c).dot(t), f + vec2(b, d).dot(t)); }
     inline mat23 operator*(vec2 s) const { return mat23(a * s.x, b * s.x, c * s.y, d * s.y, e, f); }
     inline vec2 transformVector(vec2 v) const { return vec2(vec2(a, c).dot(v), vec2(b, d).dot(v)); }
     inline vec2 transformPoint(vec2 v) const { return vec2(e, f) + transformVector(v); }
+    inline f64 getRotation() const { return atan2(-c, a); }
+    inline vec2 getScale() const { return vec2(vec2(a, c).length(), vec2(b, d).length()); }
+};
+
+typedef struct { f64 e1, e2; } eigval;
+typedef struct { vec2 v1, v2; } eigvec;
+
+class mat2 {
+    public:
+    f64 a, b, c, d;
+    mat2(): a(1), b(0), c(0), d(1) {}
+    mat2(f64 a, f64 b, f64 c, f64 d): a(a), b(b), c(c), d(d) {}
+    f64 det() const { return a * d - b * c; }
+    mat2 inverse() const { f64 dt = det(); return mat2(d/dt, -b/dt, -c/dt, a/dt); }
+    mat2 transpose() const { return mat2(a, c, b, d); }
+    f64 trace() const { return a + d; }
+    mat2 operator*(mat2 o) const { return mat2(a * o.a, b * o.b, c * o.c, d * o.d); }
+    vec2 transform(vec2 p) const { return vec2(vec2(a, b).dot(p), vec2(c, d).dot(p)); }
+    eigval eigenvalues() const {
+        f64 m = trace() / 2, d = det();
+        f64 t = sqrt(m * m - d);
+        return {m + t, m - t};
+    }
+    eigvec eigenvectors(eigval ev) const {
+        if (c != 0) return {vec2(ev.e1 - d, c), vec2(ev.e2 - d, c)};
+        if (b != 0) return {vec2(b, ev.e1 - a), vec2(b, ev.e2 - a)};
+        if (abs(transform(vec2(1, 0)).x - ev.e1) < EPSILON)
+            return {vec2(1, 0), vec2(0, 1)};
+        return {vec2(0, 1), vec2(1, 0)};
+    }
+};
+
+class mat3 {
+    public:
+    f64 m11, m12, m13, m21, m22, m23, m31, m32, m33;
+    mat3(f64 m11, f64 m12, f64 m13, f64 m21, f64 m22, f64 m23, f64 m31, f64 m32, f64 m33):
+        m11(m11), m12(m12), m13(m13), m21(m21), m22(m22), m23(m23), m31(m31), m32(m32), m33(m33) {}
+    mat3(mat2 f): m11(f.a), m12(f.b), m13(0), m21(f.c), m22(f.d), m23(0), m31(0), m32(0), m33(1) {}
+    inline mat2 toMat2() const { return mat2(m11, m12, m21, m22); }
+    inline mat3 rotate(f64 angle) const {
+        f64 c = cos(angle), s = sin(angle);
+        return mat3(c * m11 + s * m21, c * m12 + s * m22, m13,
+                    c * m21 - s * m11, c * m22 - s * m12, m23,
+                    m31,               m32,               m33);
+    }
+    inline mat3 scale(vec2 s) const {
+        return mat3(m11 * s.x, m12 * s.x, m13,
+                    m21 * s.y, m22 * s.y, m23,
+                    m31,       m32,       m33);
+    }
 };
 
 // MARK: GJK algorithm
 
-struct XBounds { double left, right; };
+typedef struct { f64 left, right; } xbounds;
 
 enum ColliderType {
     NONE,
-    CIRCLE,
     ELLIPSE,
     POLYGON
 };
-EXPORT ColliderType CT_NONE = ColliderType::NONE;
-EXPORT ColliderType CT_CIRCLE = ColliderType::CIRCLE;
 EXPORT ColliderType CT_ELLIPSE = ColliderType::ELLIPSE;
 EXPORT ColliderType CT_POLYGON = ColliderType::POLYGON;
 
@@ -154,23 +205,15 @@ class Collider {
     Collider(): type(NONE) {}
     Collider(vec2 center, ColliderType type): center(center), type(type) {}
     virtual vec2 support(vec2 direction) const { return vec2(NAN, NAN); };
-    virtual XBounds bounds() const { return {NAN, NAN}; }
-    virtual void transform(Collider **out) { abort(); }
-};
-
-class Circle: public Collider {
-    public:
-    double radius;
-    Circle(vec2 center, double radius): Collider(center, CIRCLE), radius(radius) { }
-    vec2 support(vec2 direction) const { return direction.unit() * radius + center; }
-    XBounds bounds() const { return {center.x - radius, center.x + radius}; }
+    virtual xbounds bounds() const { return {NAN, NAN}; }
+    virtual void transform(mat23 t, Collider **out) { abort(); }
 };
 
 class Ellipse: public Collider {
     public:
-    double angle;
+    f64 angle;
     vec2 radii;
-    Ellipse(vec2 center, vec2 radii, double angle):
+    Ellipse(vec2 center, vec2 radii, f64 angle):
         Collider(center, ELLIPSE), radii(radii), angle(angle) {}
     vec2 support(vec2 direction) {
         return (center
@@ -180,12 +223,49 @@ class Ellipse: public Collider {
                 // Rotated
                 : (direction.rotate(-angle).unit() * radii).rotate(angle)));
     }
-    XBounds bounds() {
+    xbounds bounds() {
         if (angle == 0) {
             return {center.x - radii.x, center.x + radii.x};
         }
-        double halfwidth = (radii * vec2(1, 0).rotate(angle)).length();
+        f64 halfwidth = (radii * vec2(1, 0).rotate(angle)).length();
         return {center.x - halfwidth, center.x + halfwidth};
+    }
+    void transform(mat23 t, Collider **out) {
+        if (out == NULL) abort();
+        if (*out == NULL || (*out)->type != ELLIPSE) {
+            delete *out;
+            *out = new Ellipse(center, radii, angle);
+        }
+        Ellipse *res = (Ellipse *)*out;
+        res->center = t.transformPoint(center);
+        if (angle == 0 && t.getRotation() == 0) {
+            res->radii = vec2(t.a, t.d) * radii;
+            res->angle = 0;
+        } else {
+            res->fromMat2(mat3(toMat2()).scale(t.getScale()).rotate(t.getRotation()).toMat2());
+        }
+    }
+    inline mat2 toMat2() const {
+        f64 c = cos(angle), s = sin(angle);
+        return mat2(c * radii.x, -s * radii.y, s * radii.x, c * radii.y);
+    }
+    inline void fromMat2(mat2 tr) {
+        mat2 inv = tr.inverse();
+        mat2 M = inv.transpose() * inv;
+        eigval eva = M.eigenvalues();
+        eigvec evc = M.eigenvectors(eva);
+
+        f64 a = 1/sqrt(eva.e1), b = 1/sqrt(eva.e2);
+
+        // Make sure we use the semi-major axis for the rotation
+        if (a > b) {
+            radii = vec2(a, b);
+            angle = atan2(-evc.v1.y, evc.v1.x);
+        }
+        else {
+            radii = vec2(b, a);
+            angle = atan2(-evc.v2.y, evc.v2.x);
+        }
     }
 };
 
@@ -209,10 +289,10 @@ class Polygon: public Collider {
     }
     vec2 support(vec2 direction) {
         vec2 maxPoint = vec2(NAN, NAN);
-        double maxDistance = -INFINITY;
+        f64 maxDistance = -INFINITY;
         for (size_t i = 0; i < length; i++) {
             vec2 vertex = vertices[i];
-            double dist = vertex.dot(direction);
+            f64 dist = vertex.dot(direction);
             if (dist > maxDistance) {
                 maxDistance = dist;
                 maxPoint = vertex;
@@ -220,14 +300,27 @@ class Polygon: public Collider {
         }
         return maxPoint;
     }
-    XBounds bounds() {
-        double min = INFINITY, max = -INFINITY;
+    xbounds bounds() {
+        f64 min = INFINITY, max = -INFINITY;
         for (size_t i = 0; i < length; i++) {
             vec2 vertex = vertices[i];
             if (vertex.x > max) max = vertex.x;
             if (vertex.x < min) min = vertex.x;
         }
         return {min, max};
+    }
+    void transform(mat23 t, Collider **out) {
+        if (out == NULL) abort();
+        if (*out == NULL || (*out)->type != POLYGON) {
+            delete *out;
+            *out = new Polygon(vec2(0, 0));
+        }
+        Polygon *res = (Polygon *)*out;
+        res->ensureCapacity(length);
+        for (int i = 0; i < length; i++) {
+            res->vertices[i] = t.transformPoint(vertices[i]);
+        }
+        res->center = res->vertices[0];
     }
 };
 
@@ -240,7 +333,7 @@ inline vec2 calculateSupport(Collider *a, Collider *b, vec2 direction) {
 inline vec2 tripleProduct(vec2 a, vec2 b, vec2 c) {
     // AxB = (0, 0, axb)
     // AxBxC = (-axb * c.y, axb * c.x, 0)
-    double n = a.x * b.y - a.y * b.x;
+    f64 n = a.x * b.y - a.y * b.x;
     // This vector lies in the same plane as a and b and is perpendicular to c
     return vec2(-n * c.y, n * c.x);
 }
@@ -260,17 +353,17 @@ typedef enum {
 
 class SimplexEdge {
     public:
-    double distance;
+    f64 distance;
     int index;
     vec2 normal;
-    SimplexEdge(double distance, int index, vec2 normal): distance(distance), index(index), normal(normal) {}
+    SimplexEdge(f64 distance, int index, vec2 normal): distance(distance), index(index), normal(normal) {}
 };
 
 class GJKResult {
     public:
     vec2 normal;
-    double distance;
-    GJKResult(vec2 normal, double distance): normal(normal), distance(distance) {}
+    f64 distance;
+    GJKResult(vec2 normal, f64 distance): normal(normal), distance(distance) {}
 };
 
 class Simplex {
@@ -360,7 +453,7 @@ class Simplex {
 
     /** Returns the edge closest to the origin */
     SimplexEdge findClosestEdge(PolygonWinding winding) {
-        double minDistance = INFINITY;
+        f64 minDistance = INFINITY;
         vec2 minNormal, line, norm;
         int minIndex = 0;
         for (int i = 0; i < length; i++) {
@@ -371,7 +464,7 @@ class Simplex {
             norm = (vec2(line.y, -line.x) * (winding == CLOCKWISE ? 1 : -1)).unit();
 
             // Only keep the edge closest to the origin
-            double dist = norm.dot(vertices[i]);
+            f64 dist = norm.dot(vertices[i]);
             if (dist < minDistance) {
                 minDistance = dist;
                 minNormal = norm;
@@ -383,13 +476,12 @@ class Simplex {
 
     /** Returns true if the shapes collide */
     std::optional<GJKResult> getIntersection(Collider *colliderA, Collider *colliderB) {
-        const double EPSILON = 0.00001;
 
-        double e0 = (vertices[1].x - vertices[0].x)
+        f64 e0 = (vertices[1].x - vertices[0].x)
             * (vertices[1].y + vertices[0].y);
-        double e1 = (vertices[2].x - vertices[1].x)
+        f64 e1 = (vertices[2].x - vertices[1].x)
             * (vertices[2].y + vertices[1].y);
-        double e2 = (vertices[0].x - vertices[2].x)
+        f64 e2 = (vertices[0].x - vertices[2].x)
             * (vertices[0].y + vertices[2].y);
         auto winding = (e0 + e1 + e2 >= 0)
             ? CLOCKWISE
@@ -401,12 +493,12 @@ class Simplex {
             // Calculate the difference for the two vertices furthest along the direction of the edge normal
             vec2 support = calculateSupport(colliderA, colliderB, edge.normal);
             // Check distance to the origin
-            double distance = support.dot(edge.normal);
+            f64 distance = support.dot(edge.normal);
             intersection = edge.normal * distance;
 
             // If close enough, return if we need to move a distance greater than 0
             if (abs(distance - edge.distance) <= EPSILON) {
-                double len = intersection.length();
+                f64 len = intersection.length();
                 if (len != 0) return GJKResult(-intersection/len, len);
                 else return {};
             }
@@ -426,7 +518,7 @@ class Simplex {
 
         // Return if we need to move a distance greater than 0
         // Since we did more than the maximum amount of iterations, this may not be optimal
-        double len = intersection.length();
+        f64 len = intersection.length();
         if (len != 0) return GJKResult(-intersection/len, len);
         else return {};
     }
@@ -448,8 +540,8 @@ class SAPEdge {
     public:
     GameObj *object;
     bool isLeft;
-    double x;
-    SAPEdge(GameObj *object, bool isLeft, double x): object(object), isLeft(isLeft), x(x) {}
+    f64 x;
+    SAPEdge(GameObj *object, bool isLeft, f64 x): object(object), isLeft(isLeft), x(x) {}
 };
 
 
@@ -467,12 +559,15 @@ class GameObj {
     GameObj(int id, SAPEdge *left, SAPEdge *right, Collider *localArea):
         id(id), left(left), right(right), localArea(localArea), worldArea(NULL),
         areaOffset(vec2(0, 0)), areaScale(vec2(1, 1)), transform(mat23()) {}
-    void updateEdges() {
-        if (!isObjActive(id)) return;
+    void update() {
         GameObj::recentGameObjPull = this;
         pullTransform(id);
-        // TODO: update world area transform
-        abort();
+        // TODO: anchor point if we're a rectangle
+        mat23 t2 = (transform + areaOffset) * areaScale;
+        localArea->transform(t2, &worldArea);
+        xbounds b = worldArea->bounds();
+        left->x = b.left;
+        right->x = b.right;
     }
 };
 
@@ -484,7 +579,7 @@ typedef struct {
     GameObj *obj;
 } iterateStuff;
 
-double gameobj_same_id_comparator(void *id, void *obj) { return *(int *)id - ((GameObj *)obj)->id; }
+f64 gameobj_same_id_comparator(void *id, void *obj) { return *(int *)id - ((GameObj *)obj)->id; }
 
 class SweepAndPrune {
     public:
@@ -504,7 +599,7 @@ class SweepAndPrune {
         GameObj *obj = (GameObj *)objects.remove(&id, gameobj_same_id_comparator);
         if (obj != NULL) {
             // must call twice to remove both
-            comparator hasEdge = [](void *obj, void *edge) -> double { return 1 - ((SAPEdge *)edge == ((GameObj *)obj)->left || (SAPEdge *)edge == ((GameObj *)obj)->right); };
+            comparator hasEdge = [](void *obj, void *edge) -> f64 { return 1 - ((SAPEdge *)edge == ((GameObj *)obj)->left || (SAPEdge *)edge == ((GameObj *)obj)->right); };
             edges.remove((void *)obj, hasEdge);
             edges.remove((void *)obj, hasEdge);
             delete obj->left;
@@ -518,9 +613,13 @@ class SweepAndPrune {
     }
     void run() {
         // update all of the collider and edge data
-        objects.iterate(NULL, [](void *arg, void *object) -> void { (void)arg; ((GameObj *)object)->updateEdges(); });
+        objects.iterate(NULL, [](void *arg, void *object) -> void {
+            (void)arg;
+            if (isObjActive(((GameObj *)object)->id))
+                ((GameObj *)object)->update();
+        });
         // sort edges
-        edges.insertionSort([](void *a, void *b) -> double { return ((SAPEdge *)b)->x - ((SAPEdge *)a)->x; });
+        edges.insertionSort([](void *a, void *b) -> f64 { return ((SAPEdge *)b)->x - ((SAPEdge *)a)->x; });
         // then find all the pairs that may be colliding
         List touching;
         Simplex simplex;
@@ -546,7 +645,7 @@ class SweepAndPrune {
                 }
                 stuff->touching->push((void *)object);
             } else {
-                stuff->touching->remove((void *)object, [](void *a, void *b) -> double { return (int)a - (int)b; });
+                stuff->touching->remove((void *)object, [](void *a, void *b) -> f64 { return (int)a - (int)b; });
             }
         });
     }
@@ -569,9 +668,8 @@ EXPORT void clear() {
     sap.clear();
 }
 
-EXPORT Collider *collider_allocate(ColliderType type, double cx, double cy) {
+EXPORT Collider *collider_allocate(ColliderType type, f64 cx, f64 cy) {
     switch (type) {
-        case CIRCLE: return new Circle(vec2(cx, cy), NAN);
         case ELLIPSE: return new Ellipse(vec2(cx, cy), vec2(NAN, NAN), NAN);
         case POLYGON: return new Polygon(vec2(cx, cy));
         default: abort();
@@ -582,11 +680,7 @@ EXPORT void registerObject(int objID, Collider *coll) {
     sap.add(objID, coll);
 }
 
-EXPORT void circle_sendData(Circle *c, double r) {
-    c->radius = r;
-}
-
-EXPORT void ellipse_sendData(Ellipse *e, double a, double rx, double ry) {
+EXPORT void ellipse_sendData(Ellipse *e, f64 a, f64 rx, f64 ry) {
     e->angle = a;
     e->radii = vec2(rx, ry);
 }
@@ -598,9 +692,10 @@ EXPORT vec2 *polygon_ensureVertices(Polygon *p, int nverts) {
 
 EXPORT void sendTransform(
     int id,
-    double ox, double oy,
-    double sx, double sy,
-    double ma, double mb, double mc, double md, double me, double mf) {
+    f64 ox, f64 oy,
+    f64 sx, f64 sy,
+    f64 ma, f64 mb, f64 mc, f64 md, f64 me, f64 mf) {
+        // TODO: need to handle anchor point for rects
         GameObj *target = GameObj::recentGameObjPull != NULL && GameObj::recentGameObjPull->id == id
                             ? GameObj::recentGameObjPull
                             : (GameObj *)sap.objects.find(&id, gameobj_same_id_comparator);
