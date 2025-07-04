@@ -18,7 +18,7 @@
         "typescript": "^5.6.2"
     },
     "peerDependencies": {
-        "kaplay": "github:dragoncoder047/kaplay#b7d051047929b9982401b2391c84967aca13572e"
+        "kaplay": "^4000.0.0-alpha.20"
     },
     "type": "module",
     "files": [

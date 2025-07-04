@@ -136,7 +136,7 @@ export function kaplayPhysicsWasm(k: KAPLAYCtx): Partial<KAPLAYCtx> {
 
     k.system("collision", () => {
         wasm.runCollision();
-    }, [k.SystemPhase.AfterFixedUpdate]);
+    }, [k.SystemPhase.AfterFixedUpdate, k.SystemPhase.AfterUpdate]);
 
     k.onSceneLeave(() => {
         wasm.clear();
