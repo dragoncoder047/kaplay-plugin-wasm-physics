@@ -1,0 +1,34 @@
+{
+    "name": "kaplay-plugin-wasm-physics",
+    "description": "Speed up KAPLAY's physics engine using WebAssembly. Drop-in replacement!",
+    "keywords": [],
+    "author": "dragoncoder047",
+    "scripts": {
+        "build": "node build.mjs",
+        "dev:build": "node build.mjs -w",
+        "dev:serve": "python3 -m http.server",
+        "dev": "pnpm run \"/^dev:.*/\"",
+        "lint": "tsc",
+        "prepare": "if [ ! -e build/plugin.js ]; then npm run build; fi",
+        "debugwasm": "npx wasm2wat physics.wasm -f"
+    },
+    "license": "GPL-3.0-only",
+    "devDependencies": {
+        "esbuild": "^0.25.0",
+        "typescript": "^5.6.2"
+    },
+    "peerDependencies": {
+        "kaplay": "github:dragoncoder047/kaplay#b7d051047929b9982401b2391c84967aca13572e"
+    },
+    "type": "module",
+    "files": [
+        "build/",
+        "README.md"
+    ],
+    "exports": {
+        ".": {
+            "import": "./build/plugin.js",
+            "types": "./index.ts"
+        }
+    }
+}
