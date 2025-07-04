@@ -1,23 +1,10 @@
 #include <emscripten.h>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-#include <functional>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
 #include <optional>
 
-#ifndef EMSCRIPTEN_KEEPALIVE
-#define EMSCRIPTEN_KEEPALIVE
-#endif
-
-#ifndef EM_IMPORT
-#define EM_IMPORT(...)
-#endif
-
 #define EXPORT EMSCRIPTEN_KEEPALIVE extern "C"
-
-// MARK: forward declarations
-
-enum ColliderType: int;
 
 // MARK: imports
 
@@ -30,9 +17,8 @@ EM_IMPORT(checkCollisionIgnore) bool checkCollisionIgnore(int idA, int idB);
 /** returns true if the object isn't paused */
 EM_IMPORT(isObjActive) bool isObjActive(int id);
 
-// TODO: better imports for sending objects
-/* writes 6 floats to scratchpad */
-EM_IMPORT(updateCollider) ColliderType updateCollider(int id);
+/* tells the JS code to send the transformation data for the object with this id */
+EM_IMPORT(pullTransform) void pullTransform(int id);
 
 // MARK: lists n' stuff
 
@@ -134,11 +120,23 @@ class vec2 {
     inline vec2 rotate(double angle) const { double s = sin(angle), c = cos(angle); return vec2(x*c - y*s, x*s + y*c); }
 };
 
+class mat23 {
+    public:
+    double a, b, c, d, e, f;
+    mat23(): a(1), b(0), c(0), d(1), e(0), f(0) {}
+    mat23(double a, double b, double c, double d, double e, double f):
+        a(a), b(b), c(c), d(d), e(e), f(f) {}
+    inline mat23 operator+(vec2 t) const { return mat23(a, b, c, d, e + vec2(a, c).dot(t), f + vec2(b, d).dot(t)); }
+    inline mat23 operator*(vec2 s) const { return mat23(a * s.x, b * s.x, c * s.y, d * s.y, e, f); }
+    inline vec2 transformVector(vec2 v) const { return vec2(vec2(a, c).dot(v), vec2(b, d).dot(v)); }
+    inline vec2 transformPoint(vec2 v) const { return vec2(e, f) + transformVector(v); }
+};
+
 // MARK: GJK algorithm
 
 struct XBounds { double left, right; };
 
-enum ColliderType: int {
+enum ColliderType {
     NONE,
     CIRCLE,
     ELLIPSE,
@@ -157,6 +155,7 @@ class Collider {
     Collider(vec2 center, ColliderType type): center(center), type(type) {}
     virtual vec2 support(vec2 direction) const { return vec2(NAN, NAN); };
     virtual XBounds bounds() const { return {NAN, NAN}; }
+    virtual void transform(Collider **out) { abort(); }
 };
 
 class Circle: public Collider {
@@ -453,25 +452,39 @@ class SAPEdge {
     SAPEdge(GameObj *object, bool isLeft, double x): object(object), isLeft(isLeft), x(x) {}
 };
 
+
 class GameObj {
     public:
+    static GameObj *recentGameObjPull;
     int id;
-    Collider *collider;
+    Collider *localArea;
+    Collider *worldArea;
     SAPEdge *left;
     SAPEdge *right;
-    GameObj(int id, SAPEdge *left, SAPEdge *right, Collider *collider):
-        id(id), left(left), right(right), collider(collider) {}
+    vec2 areaOffset;
+    vec2 areaScale;
+    mat23 transform;
+    GameObj(int id, SAPEdge *left, SAPEdge *right, Collider *localArea):
+        id(id), left(left), right(right), localArea(localArea), worldArea(NULL),
+        areaOffset(vec2(0, 0)), areaScale(vec2(1, 1)), transform(mat23()) {}
     void updateEdges() {
         if (!isObjActive(id)) return;
-        abort(); // TODO: implement this
+        GameObj::recentGameObjPull = this;
+        pullTransform(id);
+        // TODO: update world area transform
+        abort();
     }
 };
+
+GameObj *GameObj::recentGameObjPull = NULL;
 
 typedef struct {
     List *touching;
     Simplex *simp;
     GameObj *obj;
 } iterateStuff;
+
+double gameobj_same_id_comparator(void *id, void *obj) { return *(int *)id - ((GameObj *)obj)->id; }
 
 class SweepAndPrune {
     public:
@@ -488,7 +501,7 @@ class SweepAndPrune {
         objects.push((void *)obj);
     }
     void remove(int id) {
-        GameObj *obj = (GameObj *)objects.remove(&id, [](void *id, void *obj) -> double { return *(int *)id - ((GameObj *)obj)->id; });
+        GameObj *obj = (GameObj *)objects.remove(&id, gameobj_same_id_comparator);
         if (obj != NULL) {
             // must call twice to remove both
             comparator hasEdge = [](void *obj, void *edge) -> double { return 1 - ((SAPEdge *)edge == ((GameObj *)obj)->left || (SAPEdge *)edge == ((GameObj *)obj)->right); };
@@ -525,7 +538,7 @@ class SweepAndPrune {
                         if (isObjActive(stuff->obj->id) && !checkCollisionIgnore(other->id, stuff->obj->id)) {
                             // we found a colliding pair
                             stuff->simp->reset();
-                            std::optional<GJKResult> res = stuff->simp->gjkIntersection(other->collider, stuff->obj->collider);
+                            std::optional<GJKResult> res = stuff->simp->gjkIntersection(other->worldArea, stuff->obj->worldArea);
                             if (res.has_value())
                                 handleCollision(other->id, stuff->obj->id, res->normal.x, res->normal.y, res->distance);
                         }
@@ -581,4 +594,18 @@ EXPORT void ellipse_sendData(Ellipse *e, double a, double rx, double ry) {
 EXPORT vec2 *polygon_ensureVertices(Polygon *p, int nverts) {
     p->ensureCapacity(nverts);
     return p->vertices;
+}
+
+EXPORT void sendTransform(
+    int id,
+    double ox, double oy,
+    double sx, double sy,
+    double ma, double mb, double mc, double md, double me, double mf) {
+        GameObj *target = GameObj::recentGameObjPull != NULL && GameObj::recentGameObjPull->id == id
+                            ? GameObj::recentGameObjPull
+                            : (GameObj *)sap.objects.find(&id, gameobj_same_id_comparator);
+        if (target == NULL) abort();
+        target->areaOffset = vec2(ox, oy);
+        target->areaScale = vec2(sx, sy);
+        target->transform = mat23(ma, mb, mc, md, me, mf);
 }

@@ -1,4 +1,4 @@
-import type { AreaComp, AreaCompOpt, GameObj, KAPLAYCtx, Vec2 } from "kaplay";
+import type { AreaComp, AreaCompOpt, GameObj, KAPLAYCtx, Shape, Vec2 } from "kaplay";
 import physicsWasmBin from "./physics.cpp";
 
 async function initWASM(imports: Record<string, any>): Promise<PhysicsWasmExports> {
@@ -27,6 +27,12 @@ interface PhysicsWasmExports extends WebAssembly.Exports {
     /** returns pointer to the vertices which is a Float64Array with x, y, x, y, x, y, x, y, etc.
      * the first element (center) was already initialized. */
     polygon_ensureVertices(objPtr: number, numVertices: number): number
+
+    sendTransform(
+        id: number,
+        ox: number, oy: number,
+        sx: number, sy: number,
+        ma: number, mb: number, mc: number, md: number, me: number, mf: number): void;
 }
 
 function isPaused(obj: GameObj): boolean {
@@ -121,12 +127,46 @@ export function kaplayPhysicsWasm(k: KAPLAYCtx): Partial<KAPLAYCtx> {
                 col2.resolved = col1.resolved;
                 other.trigger("collideUpdate", obj, col2);
             },
-            emscripten_notify_memory_growth() {
-                k.debug.log("WASM module called (memory.grow) successfully")
+            pullTransform(id: number) {
+                const o = idToObjMap.get(id);
+                if (!o) throw new Error("object not found!!");
+                const { x: sx, y: sy } = o.area.scale;
+                const { x: ox, y: oy } = o.area.offset;
+                const { a, b, c, d, e, f } = o.transform;
+                wasm.sendTransform(id, ox, oy, sx, sy, a, b, c, d, e, f);
+            },
+            emscripten_notify_memory_growth(index: number) {
+                k.debug.log(`WASM module called (memory.grow) for memory #${index}`)
             }
         }
     };
 
+    const allocWasmAreaObj = (localArea: Shape): number => {
+        if (localArea instanceof k.Circle) {
+            const circlePtr = wasm.collider_allocate(wasm.CT_CIRCLE.value, localArea.center.x, localArea.center.y);
+            wasm.circle_sendData(circlePtr, localArea.radius);
+            return circlePtr;
+        } else if (localArea instanceof k.Ellipse) {
+            const ellipsePtr = wasm.collider_allocate(wasm.CT_ELLIPSE.value, localArea.center.x, localArea.center.y);
+            wasm.ellipse_sendData(ellipsePtr, localArea.angle, localArea.radiusX, localArea.radiusY);
+            return ellipsePtr;
+        } else {
+            const points: [Vec2, ...Vec2[]] = (
+                localArea instanceof k.Rect ? localArea.points() :
+                    localArea instanceof k.Polygon ? localArea.pts as any :
+                        localArea instanceof k.Line ? [localArea.p1, localArea.p2] :
+                            localArea instanceof k.Point ? [localArea.pt] :
+                                (() => { throw new Error("unknown shape type") })())
+            const polygonPtr = wasm.collider_allocate(wasm.CT_POLYGON.value, points[0].x, points[0].y);
+            const pointsArrPtr = wasm.polygon_ensureVertices(polygonPtr, points.length);
+            const doubleArr = new Float64Array(wasm.memory.buffer, pointsArrPtr, points.length * 2);
+            for (var i = 1; i < points.length; i++) {
+                doubleArr[i * 2] = points[i]!.x;
+                doubleArr[i * 2 + 1] = points[i]!.y;
+            }
+            return polygonPtr;
+        }
+    };
 
 
     k.load((async () => {
@@ -151,7 +191,7 @@ export function kaplayPhysicsWasm(k: KAPLAYCtx): Partial<KAPLAYCtx> {
                 add(this: GameObj<AreaComp>) {
                     oldAdd?.call(this);
                     idToObjMap.set(this.id, this);
-                    wasm.registerObject(this.id);
+                    wasm.registerObject(this.id, allocWasmAreaObj(this.localArea()));
                 },
                 destroy(this: GameObj<AreaComp>) {
                     oldDestroy?.call(this);
@@ -163,3 +203,4 @@ export function kaplayPhysicsWasm(k: KAPLAYCtx): Partial<KAPLAYCtx> {
         },
     }
 }
+export default kaplayPhysicsWasm;

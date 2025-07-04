@@ -41,7 +41,7 @@ const config = {
                         subprocess.execFileSync("emcc", [
                             "-msimd128", // enable SIMD v128 instructions
                             "-std=c++23", "-stdlib=libc++", // use c++
-                            "-Oz", // ultra optimizations
+                            "-Os", // ultra optimizations
                             ...(process.argv.includes("-d") ? ["-g"] : []), // use debug symbols or not
                             "-sMALLOC=emmalloc", // tiny wasm-optimized malloc
                             "-sINITIAL_MEMORY=131072", // minimum memory to start with (2 pages, not 1, because of static vars for some reason)

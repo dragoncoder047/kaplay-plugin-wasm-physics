@@ -2,5 +2,6 @@
     "cSpell.words": [
         "Emscripten",
         "kaplay"
-    ]
+    ],
+    "C_Cpp.default.compilerPath": "/Users/dc047/Desktop/Git repos/emsdk/upstream/emscripten/emcc"
 }
