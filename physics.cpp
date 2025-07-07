@@ -37,8 +37,11 @@ class List {
         Node *next;
         Node(void *item, Node *next): item(item), next(next) {}
     };
+
     Node *head;
-    List(): head(NULL) {}
+    int length;
+
+    List(): head(NULL), length(0) {}
     ~List() { clear(); }
     void clear() {
         while (head != NULL) {
@@ -46,8 +49,9 @@ class List {
             delete head;
             head = next;
         }
+        length = 0;
     }
-    void push(void *item) { head = new Node(item, head); }
+    void push(void *item) { head = new Node(item, head); length++; }
     void iterate(void *arg, iter_body body) {
         for (Node *node = head; node != NULL; node = node->next)
             body(arg, node->item);
@@ -59,6 +63,7 @@ class List {
                 void *item = removed->item;
                 *node = (*node)->next;
                 delete removed;
+                length--;
                 return item;
             }
         }
@@ -86,20 +91,14 @@ class List {
     }
     void insertionSort(comparator compare) {
         Node *sorted = NULL;
-        Node *current = head;
-        while (current != NULL) {
-            Node *next = current->next;
-            if (sorted == NULL || compare(sorted->item, current->item) < 0) {
-                current->next = sorted;
-                sorted = current;
-            } else {
-                Node *after = sorted;
-                while (after->next != NULL && compare(after->next->item, current->item) >= 0)
-                    after = after->next;
-                current->next = after->next;
-                after->next = current;
-            }
-            current = next;
+        while (head != NULL) {
+            Node *current = head;
+            head = head->next;
+            Node **p = &sorted;
+            while (*p != NULL && compare(current->item, (*p)->item) < 0.)
+                p = &((*p)->next);
+            current->next = *p;
+            *p = current;
         }
         head = sorted;
     }
@@ -110,7 +109,7 @@ class List {
 class vec2 {
     public:
     f64 x, y;
-    vec2(): x(NAN), y(NAN) {}
+    vec2(): x(0.), y(0.) {}
     vec2(f64 x, f64 y): x(x), y(y) {}
     f64 length() const { return sqrt(x*x + y*y); }
     inline vec2 operator+(vec2 other) const { return vec2(x + other.x, y + other.y); }
@@ -127,24 +126,24 @@ class vec2 {
 class mat23 {
     public:
     f64 a, b, c, d, e, f;
-    mat23(): a(1), b(0), c(0), d(1), e(0), f(0) {}
+    mat23(): a(1.), b(0.), c(0.), d(1.), e(0.), f(0.) {}
     mat23(f64 a, f64 b, f64 c, f64 d, f64 e, f64 f):
         a(a), b(b), c(c), d(d), e(e), f(f) {}
-    inline mat23 operator+(vec2 t) const { return mat23(a, b, c, d, e + vec2(a, c).dot(t), f + vec2(b, d).dot(t)); }
-    inline mat23 operator*(vec2 s) const { return mat23(a * s.x, b * s.x, c * s.y, d * s.y, e, f); }
+    inline mat23 operator+(vec2 translate) const { return mat23(a, b, c, d, e + vec2(a, c).dot(translate), f + vec2(b, d).dot(translate)); }
+    inline mat23 operator*(vec2 scale) const { return mat23(a * scale.x, b * scale.x, c * scale.y, d * scale.y, e, f); }
     inline vec2 transformVector(vec2 v) const { return vec2(vec2(a, c).dot(v), vec2(b, d).dot(v)); }
     inline vec2 transformPoint(vec2 v) const { return vec2(e, f) + transformVector(v); }
     inline f64 getRotation() const { return atan2(-c, a); }
     inline vec2 getScale() const { return vec2(vec2(a, c).length(), vec2(b, d).length()); }
 };
 
-typedef struct { f64 e1, e2; } eigval;
-typedef struct { vec2 v1, v2; } eigvec;
+typedef struct { f64 e1, e2; } eigenvalues_t;
+typedef struct { vec2 v1, v2; } eigenvectors_t;
 
 class mat2 {
     public:
     f64 a, b, c, d;
-    mat2(): a(1), b(0), c(0), d(1) {}
+    mat2(): a(1.), b(0.), c(0.), d(1.) {}
     mat2(f64 a, f64 b, f64 c, f64 d): a(a), b(b), c(c), d(d) {}
     f64 det() const { return a * d - b * c; }
     mat2 inverse() const { f64 dt = det(); return mat2(d/dt, -b/dt, -c/dt, a/dt); }
@@ -152,17 +151,17 @@ class mat2 {
     f64 trace() const { return a + d; }
     mat2 operator*(mat2 o) const { return mat2(a * o.a, b * o.b, c * o.c, d * o.d); }
     vec2 transform(vec2 p) const { return vec2(vec2(a, b).dot(p), vec2(c, d).dot(p)); }
-    eigval eigenvalues() const {
-        f64 m = trace() / 2, d = det();
+    eigenvalues_t eigenvalues() const {
+        f64 m = trace() / 2., d = det();
         f64 t = sqrt(m * m - d);
         return {m + t, m - t};
     }
-    eigvec eigenvectors(eigval ev) const {
+    eigenvectors_t eigenvectors(eigenvalues_t ev) const {
         if (c != 0) return {vec2(ev.e1 - d, c), vec2(ev.e2 - d, c)};
         if (b != 0) return {vec2(b, ev.e1 - a), vec2(b, ev.e2 - a)};
-        if (abs(transform(vec2(1, 0)).x - ev.e1) < EPSILON)
-            return {vec2(1, 0), vec2(0, 1)};
-        return {vec2(0, 1), vec2(1, 0)};
+        if (abs(transform(vec2(1., 0.)).x - ev.e1) < EPSILON)
+            return {vec2(1., 0.), vec2(0., 1.)};
+        return {vec2(0., 1.), vec2(1., 0.)};
     }
 };
 
@@ -171,7 +170,7 @@ class mat3 {
     f64 m11, m12, m13, m21, m22, m23, m31, m32, m33;
     mat3(f64 m11, f64 m12, f64 m13, f64 m21, f64 m22, f64 m23, f64 m31, f64 m32, f64 m33):
         m11(m11), m12(m12), m13(m13), m21(m21), m22(m22), m23(m23), m31(m31), m32(m32), m33(m33) {}
-    mat3(mat2 f): m11(f.a), m12(f.b), m13(0), m21(f.c), m22(f.d), m23(0), m31(0), m32(0), m33(1) {}
+    mat3(mat2 f): m11(f.a), m12(f.b), m13(0.), m21(f.c), m22(f.d), m23(0.), m31(0.), m32(0.), m33(1.) {}
     inline mat2 toMat2() const { return mat2(m11, m12, m21, m22); }
     inline mat3 rotate(f64 angle) const {
         f64 c = cos(angle), s = sin(angle);
@@ -188,7 +187,7 @@ class mat3 {
 
 // MARK: GJK algorithm
 
-typedef struct { f64 left, right; } xbounds;
+typedef struct { f64 left, right; } EdgeBounds;
 
 enum ColliderType {
     NONE,
@@ -201,12 +200,15 @@ EXPORT ColliderType CT_POLYGON = ColliderType::POLYGON;
 class Collider {
     public:
     vec2 center;
+    vec2 anchor;
     ColliderType type;
     Collider(): type(NONE) {}
-    Collider(vec2 center, ColliderType type): center(center), type(type) {}
-    virtual vec2 support(vec2 direction) const { return vec2(NAN, NAN); };
-    virtual xbounds bounds() const { return {NAN, NAN}; }
-    virtual void transform(mat23 t, Collider **out) { abort(); }
+    virtual ~Collider() {} // allow deletion by any pointer
+    Collider(vec2 center, ColliderType type):
+        center(center), anchor(vec2()), type(type) {}
+    virtual vec2 support(vec2 direction) const = 0;
+    virtual EdgeBounds bounds() const = 0;
+    virtual void transform(mat23 t, Collider **out) = 0;
 };
 
 class Ellipse: public Collider {
@@ -214,8 +216,8 @@ class Ellipse: public Collider {
     f64 angle;
     vec2 radii;
     Ellipse(vec2 center, vec2 radii, f64 angle):
-        Collider(center, ELLIPSE), radii(radii), angle(angle) {}
-    vec2 support(vec2 direction) {
+        Collider(center, ELLIPSE), angle(angle), radii(radii) {}
+    vec2 support(vec2 direction) const {
         return (center
             + (angle == 0
                 // Axis aligned
@@ -223,7 +225,7 @@ class Ellipse: public Collider {
                 // Rotated
                 : (direction.rotate(-angle).unit() * radii).rotate(angle)));
     }
-    xbounds bounds() {
+    EdgeBounds bounds() const {
         if (angle == 0) {
             return {center.x - radii.x, center.x + radii.x};
         }
@@ -236,6 +238,7 @@ class Ellipse: public Collider {
             delete *out;
             *out = new Ellipse(center, radii, angle);
         }
+        // TODO: should this also take anchor into account
         Ellipse *res = (Ellipse *)*out;
         res->center = t.transformPoint(center);
         if (angle == 0 && t.getRotation() == 0) {
@@ -252,8 +255,8 @@ class Ellipse: public Collider {
     inline void fromMat2(mat2 tr) {
         mat2 inv = tr.inverse();
         mat2 M = inv.transpose() * inv;
-        eigval eva = M.eigenvalues();
-        eigvec evc = M.eigenvectors(eva);
+        eigenvalues_t eva = M.eigenvalues();
+        eigenvectors_t evc = M.eigenvectors(eva);
 
         f64 a = 1/sqrt(eva.e1), b = 1/sqrt(eva.e2);
 
@@ -271,23 +274,24 @@ class Ellipse: public Collider {
 
 class Polygon: public Collider {
     public:
-    vec2 *vertices;
+    vec2 *vertices = NULL;
+    bool isRect = false;
     int length = 0, capacity = 0;
     Polygon(vec2 center): Collider(center, POLYGON) { addVertex(center); }
-    ~Polygon() { free(vertices); }
+    ~Polygon() { delete[] vertices; }
     void ensureCapacity(int length) {
         if (length <= capacity) return;
         while (length > capacity) capacity <<= 1;
-        vec2 *newVertices = (vec2 *)calloc(capacity, sizeof(vec2));
+        vec2 *newVertices = new vec2[capacity];
         memcpy(newVertices, vertices, length * sizeof(vec2));
-        free(vertices);
+        delete[] vertices;
         vertices = newVertices;
     }
     void addVertex(vec2 v) {
         ensureCapacity(length + 1);
         vertices[length++] = v;
     }
-    vec2 support(vec2 direction) {
+    vec2 support(vec2 direction) const {
         vec2 maxPoint = vec2(NAN, NAN);
         f64 maxDistance = -INFINITY;
         for (size_t i = 0; i < length; i++) {
@@ -300,7 +304,7 @@ class Polygon: public Collider {
         }
         return maxPoint;
     }
-    xbounds bounds() {
+    EdgeBounds bounds() const {
         f64 min = INFINITY, max = -INFINITY;
         for (size_t i = 0; i < length; i++) {
             vec2 vertex = vertices[i];
@@ -314,6 +318,11 @@ class Polygon: public Collider {
         if (*out == NULL || (*out)->type != POLYGON) {
             delete *out;
             *out = new Polygon(vec2(0, 0));
+        }
+        if (isRect) {
+            if (length != 4) abort();
+            vec2 dims = vertices[2] - vertices[0];
+            t = t + ((anchor + vec2(1., 1.)) * dims * -.5);
         }
         Polygon *res = (Polygon *)*out;
         res->ensureCapacity(length);
@@ -557,15 +566,14 @@ class GameObj {
     vec2 areaScale;
     mat23 transform;
     GameObj(int id, SAPEdge *left, SAPEdge *right, Collider *localArea):
-        id(id), left(left), right(right), localArea(localArea), worldArea(NULL),
+        id(id), localArea(localArea), worldArea(NULL), left(left), right(right),
         areaOffset(vec2(0, 0)), areaScale(vec2(1, 1)), transform(mat23()) {}
     void update() {
         GameObj::recentGameObjPull = this;
         pullTransform(id);
-        // TODO: anchor point if we're a rectangle
         mat23 t2 = (transform + areaOffset) * areaScale;
         localArea->transform(t2, &worldArea);
-        xbounds b = worldArea->bounds();
+        EdgeBounds b = worldArea->bounds();
         left->x = b.left;
         right->x = b.right;
     }
@@ -587,6 +595,14 @@ class SweepAndPrune {
     List objects;
     SweepAndPrune() {};
     void add(int id, Collider *coll) {
+        GameObj *existing = objects.find(&id, gameobj_same_id_comparator);
+        if (existing != NULL) {
+            delete existing->localArea;
+            delete existing->worldArea;
+            existing->localArea = coll;
+            existing->worldArea = NULL;
+            return;
+        }
         SAPEdge *left = new SAPEdge(NULL, true, NAN);
         SAPEdge *right = new SAPEdge(NULL, false, NAN);
         GameObj *obj = new GameObj(id, left, right, coll);
@@ -685,8 +701,9 @@ EXPORT void ellipse_sendData(Ellipse *e, f64 a, f64 rx, f64 ry) {
     e->radii = vec2(rx, ry);
 }
 
-EXPORT vec2 *polygon_ensureVertices(Polygon *p, int nverts) {
+EXPORT vec2 *polygon_ensureVertices(Polygon *p, int nverts, bool isRect) {
     p->ensureCapacity(nverts);
+    p->isRect = isRect;
     return p->vertices;
 }
 
@@ -694,12 +711,14 @@ EXPORT void sendTransform(
     int id,
     f64 ox, f64 oy,
     f64 sx, f64 sy,
+    f64 ax, f64 ay,
     f64 ma, f64 mb, f64 mc, f64 md, f64 me, f64 mf) {
-        // TODO: need to handle anchor point for rects
         GameObj *target = GameObj::recentGameObjPull != NULL && GameObj::recentGameObjPull->id == id
                             ? GameObj::recentGameObjPull
                             : (GameObj *)sap.objects.find(&id, gameobj_same_id_comparator);
         if (target == NULL) abort();
+        if (target->localArea == NULL) abort();
+        target->localArea->anchor = vec2(ax, ay);
         target->areaOffset = vec2(ox, oy);
         target->areaScale = vec2(sx, sy);
         target->transform = mat23(ma, mb, mc, md, me, mf);

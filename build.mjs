@@ -41,8 +41,9 @@ const config = {
                         subprocess.execFileSync("emcc", [
                             "-msimd128", // enable SIMD v128 instructions
                             "-std=c++23", "-stdlib=libc++", // use c++
-                            "-Os", // ultra optimizations
-                            ...(process.argv.includes("-d") ? ["-g"] : []), // use debug symbols or not
+                            ...(process.argv.includes("-d")  // use debug symbols or not
+                                ? ["-g", "-O0"] // no optimizations in debug build
+                                : ["-Os"]),// ultra optimizations in release mode
                             "-sMALLOC=emmalloc", // tiny wasm-optimized malloc
                             "-sINITIAL_MEMORY=131072", // minimum memory to start with (2 pages, not 1, because of static vars for some reason)
                             "-sALLOW_MEMORY_GROWTH=1", // we're using malloc
@@ -50,6 +51,7 @@ const config = {
                             "--no-entry", // don't expect a main()
                             "-flto", // turn on link-time optimization (smaller etc.)
                             "-fno-exceptions", // we don't need that
+                            "-Wall", "-Werror", // I want to fix everything
                             "-o", wasmPath,
                             args.path
                         ]);
